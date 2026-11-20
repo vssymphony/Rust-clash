@@ -29,6 +29,8 @@ concurrency:
 
 permissions:
   contents: read
+  # gitleaks-action 默认会写 PR 评论/Check，需要写权限（否则 403）
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
