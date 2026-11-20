@@ -379,7 +379,7 @@ fn forward_log(app: &AppHandle, level: &str, bytes: &[u8]) {
         return;
     }
     let level = detect_level(&text).unwrap_or_else(|| level.to_string());
-    let entry = LogEntry::kernel(level, text);
+    let entry = LogEntry::kernel(&level, text);
     {
         let state = app.state::<AppState>();
         state.push_log(entry.clone());

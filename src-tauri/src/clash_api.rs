@@ -339,7 +339,7 @@ fn dispatch(app: &AppHandle, path: &str, payload: String) {
             if message.is_empty() {
                 return;
             }
-            let entry = LogEntry::kernel(level, message);
+            let entry = LogEntry::kernel(&level, message);
             {
                 let state = app.state::<AppState>();
                 state.push_log(entry.clone());
