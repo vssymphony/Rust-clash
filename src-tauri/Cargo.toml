@@ -44,8 +44,8 @@ base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
-windows-sys = { version = "0.59", features = [
+winreg = "0.56"
+windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Networking_WinInet",
 ] }
