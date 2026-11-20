@@ -1,0 +1,19 @@
+# rustfmt 配置：只使用 stable 通道已稳定的选项，避免 CI 需要 nightly。
+# 检查指令：cargo fmt --all -- --check（只检查、不修改）。
+
+# 与 Cargo.toml 的 package.edition 保持一致；显式写出可避免在无 Cargo 上下文单独调用 rustfmt 时回退到 2015。
+edition = "2021"
+
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+
+# 用 "Auto" 而不是 "Unix"：仓库在 Windows 上检出时可能被 git 转成 CRLF，
+# 强制 Unix 会让 --check 在开发机上恒失败，而这类差异与代码质量无关。
+newline_style = "Auto"
+
+use_field_init_shorthand = true
+use_try_shorthand = true
+reorder_imports = true
+reorder_modules = true
+match_block_trailing_comma = true

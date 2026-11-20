@@ -1,0 +1,81 @@
+# gitleaks 规则配置（公开仓库密钥扫描）
+#
+# 使用方式：
+#   本地：gitleaks detect --source . --config .gitleaks.toml --redact --verbose
+#   CI  ：.github/workflows/ci.yml 的 secret-scan 作业自动读取本文件
+#
+# 设计原则：
+#   1. 以内置规则为基线（订阅 token、私钥、云厂商 AccessKey、JWT、通用密码等）；
+#   2. 额外增加 Clash / 机场订阅地址规则（内置规则不覆盖该形态）；
+#   3. 允许清单只放「结构性占位」与锁文件，绝不放真实值：
+#      example.com 类占位、TEST-NET 文档网段、127.0.0.1、工程内的假测试样例。
+title = "clash-gui secret scan"
+
+[extend]
+useDefault = true
+
+# Clash / mihomo 订阅地址（以 /api/v1/client/subscribe?...token= 形态出现）
+[[rules]]
+id = "clash-subscription-url"
+description = "Clash/Mihomo 订阅链接（带 token 的订阅地址，泄露即等同账号凭据）"
+regex = '''https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/api/v1/client/subscribe\?[^\s"'<>]*token=[A-Za-z0-9._-]{6,}'''
+tags = ["subscription", "secret"]
+
+# 订阅地址的裸 token 参数（覆盖非标准路径的订阅形态）
+[[rules]]
+id = "subscription-token-param"
+description = "订阅/配置链接中的 token 参数"
+regex = '''(?i)\b(?:sub(?:scription)?|clash)[-_ ]?(?:token|key|secret|uuid)\s*[:=]\s*['"]?[A-Za-z0-9._-]{16,}'''
+tags = ["subscription", "secret"]
+
+# 本机用户目录绝对路径（Windows / macOS / Linux 家目录），避免泄露真实用户名
+[[rules]]
+id = "local-user-home-path"
+description = "本机用户目录绝对路径（泄露真实用户名与机器环境）"
+regex = '''(?:[A-Za-z]:\\{1,2}Users\\{1,2}|/home/|/Users/)(?!<|%|\$|\{|demo\b|Public\b|username\b)[A-Za-z0-9._-]{3,}'''
+tags = ["privacy"]
+
+[[allowlists]]
+description = "结构性占位、测试样例与锁文件"
+paths = [
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)Cargo\.lock$''',
+  '''(^|/)src-tauri/src/redact\.rs$''',
+  '''(^|/)src-tauri/tests/.*\.rs$''',
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)脱敏自查报告\.md$''',
+]
+regexes = [
+  # 文档/示例占位域名
+  '''example\.com''',
+  '''example\.org''',
+  '''example\.net''',
+  '''YOUR_TOKEN''',
+  '''<YOUR_[A-Z_]+>''',
+  # 保留地址与本地回环（项目内大量出现，均非真实外泄）
+  '''\b127\.0\.0\.1\b''',
+  '''\b0\.0\.0\.0\b''',
+  '''\b198\.18\.\d+\.\d+\b''',
+  '''\b198\.51\.100\.\d+\b''',
+  '''\b10\.\d+\.\d+\.\d+\b''',
+  '''\b192\.168\.\d+\.\d+\b''',
+  '''\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b''',
+  '''\b100\.64\.\d+\.\d+\b''',
+  # 公开的公共 DNS / 连通性测试地址
+  '''(?:223\.5\.5\.5|119\.29\.29\.29|8\.8\.8\.8|1\.1\.1\.1|9\.9\.9\.9)''',
+  '''https://www\.gstatic\.com/generate_204''',
+  # 显式假值（测试固定样例，非真实凭据）
+  '''top-secret''',
+  '''ctl-secret''',
+  '''my-secret-value''',
+  '''11111111-2222-3333-4444-555555555555''',
+  '''abcd1234''',
+  '''s3cr3t''',
+  # 公开依赖与工具链地址
+  '''https://github\.com/rust-lang/crates\.io-index''',
+  '''https://registry\.npmmirror\.com''',
+  '''https://www\.wintun\.net/?''',
+  '''https://github\.com/MetaCubeX/mihomo/releases''',
+  '''https://rustup\.rs''',
+]

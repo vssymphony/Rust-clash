@@ -1,0 +1,24 @@
+# cargo-audit 配置（RustSec 漏洞库）
+#
+# 用法（CI 与本地一致）：
+#   cargo audit --file src-tauri/Cargo.lock
+# cargo-audit 会自动读取仓库根目录的 .cargo/audit.toml。
+#
+# 忽略项规则（重要）：
+#   1. 默认不忽略任何公告。任何新增忽略都必须写清：公告编号 + 原因 + 计划修复版本；
+#   2. 只允许忽略「确认与本项目实际使用路径无关」或「上游尚未发版修复」的公告；
+#   3. 忽略不等于免责：对应条目要在 CHANGELOG.md 的 Security 段留痕。
+#
+# 与 deny.toml 的分工：漏洞库走本文件；许可证 / 依赖来源 / 重复依赖走 deny.toml。
+
+[advisories]
+ignore = [
+  # 示例（保持注释状态，避免误启用）：
+  # "RUSTSEC-2024-0000",
+  # # 原因：该公告影响的是 crate 的 X 特性，本项目未启用该特性；计划在 <版本> 随上游修复移除。
+]
+
+[output]
+# 有漏洞时安静输出精简摘要即可，详细 JSON 由 CI artifact 保存的日志承担
+quiet = false
+deny = "warnings"

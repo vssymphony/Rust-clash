@@ -1,0 +1,457 @@
+# 持续集成：静态检查 + 测试 + 依赖与许可证审计
+#
+# 触发：pull_request / push main / 手动
+# 职责边界：本工作流只做「验证」，不产出任何安装包；打包与发布见 release.yml。
+# 设计要点：
+#   - 所有 job 统一 `shell: bash`（ubuntu 自带 bash，windows-latest 自带 Git Bash），
+#     这样才能用同一套 `2>&1 | tee` + `set -o pipefail` 收集日志；
+#   - 日志写入 $RUNNER_TEMP/logs，job 失败时由末尾 step 统一上传为 artifact；
+#   - rust-clippy / rust-test 都需要先 `npm ci && npm run build`：lib.rs 里的
+#     tauri::generate_context! 在编译期读取 tauri.conf.json 的 frontendDist(../dist)，
+#     目录缺失会直接编译失败；
+#   - 不在 CI 里执行 `cargo build` 之外的打包动作，也不下载 mihomo / wintun；
+#   - 工具链目标统一为 MSVC：Windows runner 的 rustc host 必须是
+#     x86_64-pc-windows-msvc（rust-toolchain.toml 已固定），GNU 仅作可选兼容分支；
+#   - secret-scan 作业用 gitleaks 做提交历史全量密钥扫描，规则见 .gitleaks.toml。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支的新提交取消上一次未完成的检查，节省 runner 时间
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  NODE_VERSION: "20"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------- 密钥泄漏扫描
+  # 公开仓库的硬性门槛：任何提交（含历史）出现订阅地址、token、私钥、本机路径等
+  # 敏感字面量都直接失败。允许规则（示例占位、锁文件、测试样例）见 .gitleaks.toml。
+  secret-scan:
+    name: secret-scan (gitleaks)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout（fetch-depth: 0 保证扫描全部历史）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks 扫描
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: "true"
+
+  # ---------------------------------------------------------------- 格式
+  rust-fmt:
+    name: rust-fmt (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check \
+            2>&1 | tee "$RUNNER_TEMP/logs/rust-fmt.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-rust-fmt-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- Clippy
+  rust-clippy:
+    name: rust-clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: 校验 Windows 工具链为 MSVC
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          HOST="$(rustc -vV | awk '/^host: /{print $2}')"
+          echo "rustc host: $HOST"
+          if [ "$HOST" != "x86_64-pc-windows-msvc" ]; then
+            echo "::error::Windows 构建要求 MSVC 工具链（host=x86_64-pc-windows-msvc），实际为 $HOST；请检查 rust-toolchain.toml 与 rustup default。"
+            exit 1
+          fi
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: clippy-${{ matrix.os }}-msvc
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
+
+      - name: Install frontend dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          npm ci 2>&1 | tee "$RUNNER_TEMP/logs/npm-ci.log"
+
+      - name: Build frontend (tauri context 需要 dist/)
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/logs/frontend-build.log"
+
+      - name: cargo clippy -D warnings
+        run: |
+          set -euo pipefail
+          cargo clippy --manifest-path src-tauri/Cargo.toml \
+            --all-targets --all-features -- -D warnings \
+            2>&1 | tee "$RUNNER_TEMP/logs/rust-clippy.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-rust-clippy-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- 单元 / 集成测试
+  rust-test:
+    name: rust-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 校验 Windows 工具链为 MSVC
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          HOST="$(rustc -vV | awk '/^host: /{print $2}')"
+          echo "rustc host: $HOST"
+          if [ "$HOST" != "x86_64-pc-windows-msvc" ]; then
+            echo "::error::Windows 构建要求 MSVC 工具链（host=x86_64-pc-windows-msvc），实际为 $HOST；请检查 rust-toolchain.toml 与 rustup default。"
+            exit 1
+          fi
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: test-${{ matrix.os }}-msvc
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
+
+      - name: Install frontend dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          npm ci 2>&1 | tee "$RUNNER_TEMP/logs/npm-ci.log"
+
+      - name: Build frontend (tauri context 需要 dist/)
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/logs/frontend-build.log"
+
+      - name: cargo test
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features \
+            2>&1 | tee "$RUNNER_TEMP/logs/rust-test.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-rust-test-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- 版本一致性
+  version-consistency:
+    name: version-consistency (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 校验 package.json / Cargo.toml / tauri.conf.json 版本一致
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          node scripts/sync-version.mjs 2>&1 | tee "$RUNNER_TEMP/logs/sync-version.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-version-consistency-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- 前端类型检查
+  frontend-typecheck:
+    name: frontend-typecheck (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: npm ci
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          npm ci 2>&1 | tee "$RUNNER_TEMP/logs/npm-ci.log"
+
+      - name: tsc --noEmit
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee "$RUNNER_TEMP/logs/frontend-typecheck.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-frontend-typecheck-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- 前端 Lint / 格式
+  frontend-lint:
+    name: frontend-lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: npm ci
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          npm ci 2>&1 | tee "$RUNNER_TEMP/logs/npm-ci.log"
+
+      - name: eslint --max-warnings 0
+        run: |
+          set -euo pipefail
+          npm run lint 2>&1 | tee "$RUNNER_TEMP/logs/frontend-lint.log"
+
+      - name: prettier --check
+        run: |
+          set -euo pipefail
+          npm run format:check 2>&1 | tee "$RUNNER_TEMP/logs/frontend-format.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-frontend-lint-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- 前端单测
+  frontend-test:
+    name: frontend-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: npm ci
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          npm ci 2>&1 | tee "$RUNNER_TEMP/logs/npm-ci.log"
+
+      - name: vitest run
+        run: |
+          set -euo pipefail
+          npm run test 2>&1 | tee "$RUNNER_TEMP/logs/frontend-test.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-frontend-test-${{ matrix.os }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------- 依赖与许可证审计
+  #
+  # 审计与平台无关，只在 ubuntu 上跑一次。
+  # - cargo-audit：查 RustSec 漏洞库，忽略项写在 .cargo/audit.toml（含原因注释）；
+  # - cargo-deny：查许可证白名单（deny.toml）、禁用源与重复依赖。
+  audit:
+    name: audit (dependencies / licenses)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit / cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: cargo audit
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          # 读取 src-tauri/Cargo.lock；忽略项见 .cargo/audit.toml
+          cargo audit --file src-tauri/Cargo.lock \
+            2>&1 | tee "$RUNNER_TEMP/logs/cargo-audit.log"
+
+      - name: cargo deny check
+        run: |
+          set -euo pipefail
+          # deny.toml 在仓库根目录；cargo-deny 需要在有 Cargo.toml 的目录执行，
+          # 因此先进入 src-tauri 再用 --config 显式指向根目录的配置。
+          cd src-tauri
+          cargo deny --config "$GITHUB_WORKSPACE/deny.toml" check \
+            2>&1 | tee "$RUNNER_TEMP/logs/cargo-deny.log"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-audit
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7

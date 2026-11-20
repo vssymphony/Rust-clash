@@ -1,0 +1,399 @@
+# 发布：打标签 v* 后构建 Windows x64 / Linux x64 安装包并创建 GitHub Release
+#
+# 与 ci.yml 的分工：ci.yml 只验证（fmt / clippy / test / typecheck / lint / audit），
+# 本工作流只打包与发布，二者不再有重复的构建矩阵（原 build.yml 已拆分合并到这两个文件）。
+#
+# 分发策略（与 README「分发策略」、docs/RELEASE.md 保持一致）：
+#   - mihomo 内核：由 prepare-sidecar 脚本按固定版本下载并作为 sidecar 随包（externalBin）；
+#   - wintun.dll：默认**不随包**。仓库不存放该 DLL；若构建机自备了
+#     src-tauri/binaries/wintun.dll，则先做 Authenticode 签名校验，通过后才随包（在安装
+#     根目录落地）；未提供时删除 src-tauri/tauri.windows.conf.json 中指向该文件的资源映射，
+#     保证 `tauri build` 不因缺少资源而失败，并在产物目录写下 wintun-status.txt 供发布说明引用；
+#   - 当前**不实现**应用内自动下载侧载资源，首次启动引导见 README / docs/RELEASE.md。
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      mihomo_version:
+        description: "mihomo 内核版本（形如 v1.19.0）"
+        required: false
+        default: "v1.19.0"
+      draft:
+        description: "是否创建为草稿 Release（非 tag 触发时无效）"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  NODE_VERSION: "20"
+  MIHOMO_VERSION: ${{ inputs.mihomo_version || 'v1.19.0' }}
+  # 可选下载源与固定哈希：
+  #   MIHOMO_URL         —— secret，指定内核压缩包完整地址（内网镜像/私有源），优先级高于 GitHub Releases；
+  #   MIHOMO_SHA256      —— 仓库变量，指定压缩包 SHA256，配置后 prepare-sidecar 会强制校验；
+  #   MIHOMO_DOWNLOAD_BASE —— 仓库变量，仅替换下载基地址（按标准文件名拼接）。
+  # 三者都未配置时走 GitHub Releases；网络不通会在「准备 mihomo sidecar」步骤给出明确错误。
+  MIHOMO_URL: ${{ secrets.MIHOMO_URL }}
+  MIHOMO_SHA256: ${{ vars.MIHOMO_SHA256 }}
+  MIHOMO_DOWNLOAD_BASE: ${{ vars.MIHOMO_DOWNLOAD_BASE }}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            sidecar: mihomo-x86_64-pc-windows-msvc.exe
+          - os: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+            sidecar: mihomo-x86_64-unknown-linux-gnu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Rust（MSVC 为唯一目标）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: 校验 rustc host 与矩阵目标一致
+        run: |
+          set -euo pipefail
+          HOST="$(rustc -vV | awk '/^host: /{print $2}')"
+          echo "rustc host: $HOST / 矩阵目标: ${{ matrix.triple }}"
+          if [ "$HOST" != "${{ matrix.triple }}" ]; then
+            echo "::error::rustc host（$HOST）与矩阵目标（${{ matrix.triple }}）不一致：sidecar 命名与 externalBin 解析会错位，请统一工具链为 MSVC。"
+            exit 1
+          fi
+
+      - name: 校验 Windows MSVC 构建环境
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          VSDIR="$(ls -d "/c/Program Files/Microsoft Visual Studio/2022"/* 2>/dev/null | head -n 1 || true)"
+          if [ -z "${VSDIR:-}" ]; then
+            echo "::error::未找到 Visual Studio 2022（MSVC v143 + Windows SDK）。Windows MSVC 构建必须由 VS Build Tools 提供链接器。"
+            exit 1
+          fi
+          echo "已检测到 Visual Studio：$VSDIR"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: release-${{ matrix.triple }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            rpm \
+            libfuse2 \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
+
+      - name: 版本一致性校验 + tag 与版本号对齐
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          node scripts/sync-version.mjs 2>&1 | tee "$RUNNER_TEMP/logs/sync-version.log"
+          VERSION="$(node scripts/sync-version.mjs --print)"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$TAG" != "$VERSION" ]; then
+              echo "::error::tag v$TAG 与工程版本 $VERSION 不一致，请先执行 npm run version:set -- $TAG"
+              exit 1
+            fi
+            echo "版本校验通过：tag v$TAG == $VERSION"
+          else
+            echo "非 tag 触发（workflow_dispatch），当前版本 $VERSION，跳过 tag 比对"
+          fi
+
+      - name: Install frontend dependencies
+        run: |
+          set -euo pipefail
+          npm ci 2>&1 | tee "$RUNNER_TEMP/logs/npm-ci.log"
+
+      - name: 准备 mihomo sidecar（内核随包）
+        run: |
+          set -euo pipefail
+          TRIPLE="${{ matrix.triple }}"
+          # 显式传入三元组：避免 runner 上 rustc host 与矩阵目标不一致时 sidecar 名称错位
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            pwsh -NoProfile -File scripts/prepare-sidecar.ps1 \
+              -Version "$MIHOMO_VERSION" -Triple "$TRIPLE" -Force \
+              ${MIHOMO_URL:+-Url "$MIHOMO_URL"} \
+              ${MIHOMO_SHA256:+-Sha256 "$MIHOMO_SHA256"} \
+              2>&1 | tee "$RUNNER_TEMP/logs/prepare-sidecar.log"
+          else
+            chmod +x scripts/*.sh
+            ./scripts/prepare-sidecar.sh "$MIHOMO_VERSION" --force --triple "$TRIPLE" \
+              ${MIHOMO_URL:+--url "$MIHOMO_URL"} \
+              ${MIHOMO_SHA256:+--sha256 "$MIHOMO_SHA256"} \
+              2>&1 | tee "$RUNNER_TEMP/logs/prepare-sidecar.log"
+          fi
+          if [ ! -f "src-tauri/binaries/${{ matrix.sidecar }}" ]; then
+            echo "::error::sidecar 缺失：src-tauri/binaries/${{ matrix.sidecar }}。请确认 MIHOMO_VERSION（$MIHOMO_VERSION）在下载源中存在、runner 可访问 GitHub Releases；受限网络请配置 secret MIHOMO_URL 或变量 MIHOMO_DOWNLOAD_BASE，并用变量 MIHOMO_SHA256 固定内核字节。"
+            exit 1
+          fi
+          ls -l "src-tauri/binaries/${{ matrix.sidecar }}"
+
+      - name: 记录 sidecar 来源哈希
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "src-tauri/binaries/${{ matrix.sidecar }}" \
+              | sed 's#src-tauri/binaries/##' > "release-artifacts/SIDECAR-${{ matrix.triple }}.sha256"
+          else
+            shasum -a 256 "src-tauri/binaries/${{ matrix.sidecar }}" \
+              | sed 's#src-tauri/binaries/##' > "release-artifacts/SIDECAR-${{ matrix.triple }}.sha256"
+          fi
+          # 以 # 开头写注释行，sha256sum -c 会跳过，不影响校验
+          echo "# mihomo 版本：$MIHOMO_VERSION" >> "release-artifacts/SIDECAR-${{ matrix.triple }}.sha256"
+          cat "release-artifacts/SIDECAR-${{ matrix.triple }}.sha256"
+
+      - name: wintun 分发策略（Windows）
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          if [ -f src-tauri/binaries/wintun.dll ]; then
+            echo "检测到自备 wintun.dll，执行 Authenticode 签名校验……"
+            pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-wintun-sign.ps1 \
+              -DllPath src-tauri/binaries/wintun.dll
+            sha256sum src-tauri/binaries/wintun.dll | sed 's#src-tauri/binaries/##' \
+              > release-artifacts/WINTUN.sha256
+            {
+              echo "本次 Windows 产物 **随包包含** wintun.dll（签名已校验：WireGuard LLC）。"
+              echo ""
+              echo "- wintun.dll SHA256：\`$(cut -d' ' -f1 release-artifacts/WINTUN.sha256)\`"
+            } > release-artifacts/wintun-status.txt
+          else
+            echo "::warning::未提供 src-tauri/binaries/wintun.dll，本次 Windows 产物不含 TUN 驱动"
+            rm -f src-tauri/tauri.windows.conf.json
+            {
+              echo "本次 Windows 产物 **不含** wintun.dll（TUN 驱动）。"
+              echo ""
+              echo "需要 TUN 的用户请按 docs/RELEASE.md「wintun.dll 分发策略」手动放置："
+              echo ""
+              echo "1. 从 https://www.wintun.net/ 下载与架构一致的 wintun-<版本>.zip（通常为 amd64）；"
+              echo "2. 解压后把 \`bin/amd64/wintun.dll\` 放到 \`clash-gui.exe\` 同目录；"
+              echo "3. 重启应用，设置页「运行状态」应显示已探测到的 wintun.dll 路径。"
+              echo ""
+              echo "未放置时应用仍可正常使用系统代理，仅 TUN 开关会降级并给出提示（不会修改 users 的 tunEnabled 设置）。"
+            } > release-artifacts/wintun-status.txt
+          fi
+          cat release-artifacts/wintun-status.txt
+          {
+            echo "### wintun 分发策略（${{ matrix.triple }}）"
+            echo ""
+            cat release-artifacts/wintun-status.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build Tauri bundles
+        env:
+          # 未配置签名证书，显式声明空值，避免 tauri 因缺少 updater 签名而报错
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          # prepare:sidecar（mjs）会再次检查 wintun.dll。上一步未自备 DLL 时已删除
+          # tauri.windows.conf.json，mjs 据此自动跳过；此处显式声明双保险，避免流水线
+          # 因「缺 wintun.dll」在打包前中断。
+          CLASH_GUI_SKIP_WINTUN: "1"
+        run: |
+          set -euo pipefail
+          # 显式指定 bundle 目标，避免 tauri.conf.json 的默认值随平台变化导致产物缺失：
+          # Windows -> nsis + msi；Linux -> deb + rpm + AppImage
+          case "${RUNNER_OS}" in
+            Windows) BUNDLES="nsis,msi" ;;
+            Linux)   BUNDLES="deb,rpm,appimage" ;;
+            *)       echo "::error::不支持的运行器 ${RUNNER_OS}"; exit 1 ;;
+          esac
+          echo "bundle targets: ${BUNDLES}"
+          npm run tauri:build -- --bundles "${BUNDLES}" 2>&1 | tee "$RUNNER_TEMP/logs/tauri-build.log"
+
+      - name: 收集产物并生成 SHA256SUMS
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          shopt -s nullglob
+          files=(
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::未找到任何安装包产物，请检查 bundle targets 配置"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            cp "$f" release-artifacts/
+            echo "收集：$(basename "$f")"
+          done
+          (
+            cd release-artifacts
+            rm -f SHA256SUMS
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum *.msi *.exe *.deb *.rpm *.AppImage > SHA256SUMS 2>/dev/null || true
+            else
+              shasum -a 256 *.msi *.exe *.deb *.rpm *.AppImage > SHA256SUMS 2>/dev/null || true
+            fi
+            # 只保留真实存在的安装包行，避免 glob 不匹配时把字面量写进校验文件
+            awk 'NF==2 && ($2 ~ /\.(msi|exe|deb|rpm|AppImage)$/)' SHA256SUMS > SHA256SUMS.tmp || true
+            mv SHA256SUMS.tmp SHA256SUMS
+            mv SHA256SUMS "SHA256SUMS-${{ matrix.triple }}.txt"
+          )
+          ls -l release-artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash-gui-${{ matrix.triple }}
+          if-no-files-found: error
+          retention-days: 14
+          path: release-artifacts/*
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-release-${{ matrix.triple }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  publish:
+    name: publish GitHub Release
+    needs: build
+    # 只有打 tag 时才发布；workflow_dispatch 仅产出 artifact 供手工验证
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: 合并 SHA256SUMS 并生成发布说明
+        run: |
+          set -euo pipefail
+          cd release-assets
+          ls -l
+          {
+            echo "# 安装包校验值（SHA256）"
+            echo ""
+            for f in SHA256SUMS-*.txt; do
+              [ -f "$f" ] || continue
+              cat "$f"
+              echo ""
+            done
+          } > SHA256SUMS
+          echo "---- SHA256SUMS ----"
+          cat SHA256SUMS
+
+          VERSION="$(node "$GITHUB_WORKSPACE/scripts/sync-version.mjs" --print 2>/dev/null || true)"
+          if [ -z "$VERSION" ]; then VERSION="${GITHUB_REF_NAME#v}"; fi
+
+          {
+            echo "## Clash GUI v${VERSION}"
+            echo ""
+            echo "mihomo 内核版本：\`${MIHOMO_VERSION}\`（作为 sidecar 随包）"
+            echo ""
+            echo "### 产物"
+            echo ""
+            for f in *.msi *.exe *.deb *.rpm *.AppImage; do
+              [ -f "$f" ] || continue
+              echo "- \`$f\`"
+            done
+            echo ""
+            echo "### wintun.dll 校验状态（必读）"
+            echo ""
+            if [ -f wintun-status.txt ]; then
+              cat wintun-status.txt
+            else
+              echo "未采集到 wintun 状态文件，请人工确认产物是否包含 wintun.dll。"
+            fi
+            echo ""
+            echo "### 校验方式"
+            echo ""
+            echo "下载安装包与 \`SHA256SUMS\` 后，在同目录执行："
+            echo ""
+            echo '```bash'
+            echo "sha256sum -c SHA256SUMS        # Linux"
+            echo "certutil -hashfile <文件名> SHA256   # Windows"
+            echo '```'
+            echo ""
+            echo "### 回滚"
+            echo ""
+            echo "发行版存在严重问题时，按 docs/RELEASE.md「回滚方案」执行：标记 Release 为 pre-release 或删除，"
+            echo "并在 CHANGELOG 中追加 \`### Reverted\` 段说明影响范围。"
+          } > release-body.md
+          echo "---- release-body.md ----"
+          cat release-body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: ${{ inputs.draft || false }}
+          prerelease: false
+          body_path: release-assets/release-body.md
+          files: |
+            release-assets/*.msi
+            release-assets/*.exe
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.AppImage
+            release-assets/SHA256SUMS
+            release-assets/SIDECAR-*.sha256

@@ -1,0 +1,80 @@
+[package]
+name = "clash-gui"
+version = "0.1.0"
+description = "Cross-platform Clash/mihomo desktop client"
+authors = ["clash-gui"]
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "clash_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# TLS 后端统一为 rustls（而非默认的 native-tls）：
+#   - 不链接系统 OpenSSL / Schannel，构建期无需额外的证书库或环境变量；
+#   - 该选择源自早期 GNU 目标下的规避（GNU 需额外 OpenSSL 分发），在 MSVC 目标下
+#     同样生效且不冲突：target 是 x86_64-pc-windows-msvc 时仍走 rustls + webpki-roots，
+#     证书校验行为与 GNU 一致，无需为工具链差异改依赖。
+#   若要切换回 native-tls，请同时评估 MSVC 下 Schannel 的行为差异与 GNU 下的 OpenSSL 分发成本。
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = [
+  "connect",
+  "rustls-tls-webpki-roots",
+] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+thiserror = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Networking_WinInet",
+] }
+
+# ---- Lint 策略 ----
+#
+# CI 目标：`cargo clippy --all-targets --all-features -- -D warnings`
+# 这里统一声明「开启哪些 lint、什么级别」；本地 `cargo build` 只看到 warn，
+# 不会被卡住，而 CI 的 `-D warnings` 会一次性把告警升级为错误。
+# 放在 Cargo.toml（而非 RUSTFLAGS）的好处：按 crate 生效、可被 rust-analyzer 读取、
+# 不需要在 CI 里重复拼参数。
+[lints.rust]
+# 全项目只允许 system_proxy::refresh_internet_options 一处 FFI 调用，
+# 该处已单独 #[allow(unsafe_code)] 并写了 SAFETY 说明；新增 unsafe 会被 CI 拦下。
+unsafe_code = "warn"
+unused_must_use = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# pedantic 中与 GUI/命令层代码形态天然冲突的几条降级，避免 -D warnings 误伤：
+module_name_repetitions = "allow"   # commands::xxx / storage::xxx 之类命名重复是刻意的模块切分
+missing_errors_doc = "allow"        # 内部函数不强制写 Errors 段
+missing_panics_doc = "allow"        # 同上
+must_use_candidate = "allow"        # 大量纯查询函数，逐个加 #[must_use] 反而噪音
+cast_precision_loss = "allow"       # 端口/百分比 u16→f64 的转换不可避免
+
+[profile.release]
+# 发布包体积与调试符号的平衡：去掉符号表、开启 LTO，保留 panic 展开以生成崩溃提示。
+lto = true
+codegen-units = 1
+strip = true

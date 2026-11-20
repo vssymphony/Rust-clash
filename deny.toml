@@ -1,0 +1,73 @@
+# cargo-deny 策略：许可证白名单 + 漏洞 + 依赖来源
+#
+# 用法（CI 中由 ci.yml 的 audit job 执行）：
+#   cargo deny --manifest-path src-tauri/Cargo.toml check
+# 本地若无 Rust 工具链，可安装 cargo-deny 后同样执行；本文件改动后请同步 docs/DEVELOPMENT.md。
+#
+# 与 .cargo/audit.toml 的分工：
+#   - cargo-audit（RustSec 漏洞库）→ .cargo/audit.toml 里的 ignore 白名单；
+#   - cargo-deny（许可证 / 来源 / 重复依赖）→ 本文件。
+
+[graph]
+# 只按产品实际发布的目标三元组解析依赖图，
+# 避免把 macOS / 其他架构的条件依赖也算进来导致误报。
+targets = [
+  { triple = "x86_64-pc-windows-msvc" },
+  { triple = "x86_64-unknown-linux-gnu" },
+]
+
+[advisories]
+version = 2
+# 有可用补丁的漏洞必须修；无补丁的（unmaintained / unsound）先告警不阻断，
+# 但需要在 CHANGELOG 的 Security 段注明处理计划。
+yanked = "warn"
+ignore = [
+  # 格式：
+  # { id = "RUSTSEC-0000-0000", reason = "为什么可以忽略 + 计划修复版本" }
+  #
+  # 当前为空：第一批次已把依赖收敛到 tauri 2.x + reqwest 0.12 + rustls 路径，
+  # 暂无需要豁免的公告。新增豁免必须写 reason。
+]
+
+[licenses]
+version = 2
+# 允许的许可证（本项目为 MIT，采用常见的宽松 + 弱 copyleft 白名单）
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "Unlicense",
+  "CC0-1.0",
+  "MPL-2.0",
+  "CDLA-Permissive-2.0",
+  "OpenSSL",
+  "BSL-1.0",
+]
+# 允许个别 crate 例外（当前无需例外）
+exceptions = []
+# 置信度阈值：低于该值的许可证判定会被拒绝，防止「猜测出来的许可证」蒙混过关
+confidence-threshold = 0.9
+
+[bans]
+# 同一 crate 出现多个版本先告警（tauri 依赖树里常有，强 deny 会长期红灯）
+multiple-versions = "warn"
+# 禁止 `*` 通配版本号依赖，保证构建可复现
+wildcards = "deny"
+deny = [
+  # 明确禁止的 crate（历史上有安全问题或与本项目功能重复）
+  # { name = "openssl" },  # 说明：已统一走 rustls，不需要 OpenSSL 系依赖
+]
+skip = []
+skip-tree = []
+
+[sources]
+# 依赖只能来自 crates.io，禁止未知 registry / git 源，防止供应链投毒
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

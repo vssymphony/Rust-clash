@@ -1,0 +1,16 @@
+# 工具链统一声明：MSVC 是唯一默认目标。
+#
+# 为什么固定到这里：
+#   Tauri 的 externalBin 在打包时按「文件名 + - + 编译 host 三元组」查找 sidecar，
+#   工具链在 MSVC / GNU 之间漂移会导致 sidecar 命名与查找不一致，进而打包失败。
+#   CI（.github/workflows/*.yml）与本机均以 x86_64-pc-windows-msvc 为准。
+#
+# GNU 仅为可选兼容分支：如确需 GNU，请在本地临时执行
+#   rustup override set stable-x86_64-pc-windows-gnu
+# 并通过 scripts/prepare-sidecar 的 -Triple / --triple 传入对应三元组，
+# 同时用 GNU 工具链重新编译，切勿与 MSVC 产物混用。
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc"]
+profile = "minimal"

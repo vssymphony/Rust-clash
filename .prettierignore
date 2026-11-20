@@ -1,0 +1,13 @@
+# Prettier 忽略清单
+# 构建产物与第三方依赖
+dist/
+coverage/
+node_modules/
+package-lock.json
+
+# Rust 侧由 rustfmt 负责，Prettier 不介入
+src-tauri/
+
+# 静态资源与配置快照
+src-tauri/icons/
+*.min.js

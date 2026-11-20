@@ -1,0 +1,29 @@
+# Clippy 行为配置（lint 清单本身在 Cargo.toml 的 [lints.clippy] 块内声明）。
+# CI 指令：cargo clippy --all-targets --all-features -- -D warnings
+
+# 与 Cargo.toml 的 rust-version 保持一致，避免 clippy 推荐高于 MSRV 的新 API。
+msrv = "1.90"
+
+# 本项目没有下游 crate，允许为消除 lint 而调整对外函数签名。
+avoid-breaking-exported-api = false
+
+# 命令层函数（settings / subscription / tun 等）参数天然偏多，放宽到 8 个才提示。
+too-many-arguments-threshold = 8
+
+# serde_json::Value 的嵌套类型在类型名里展开后较长，阈值放宽到 300。
+type-complexity-threshold = 300
+
+# 配置拼装类函数行数偏长（键值逐个 insert），放宽到 200 行才提示。
+too-many-lines-threshold = 200
+
+# 文档中允许出现的专有名词，避免 doc_markdown 误报（".." 必须放在最后，表示追加默认词表）。
+doc-valid-idents = [
+    "Clash",
+    "mihomo",
+    "wintun",
+    "Tauri",
+    "WebView2",
+    "NSIS",
+    "PowerShell",
+    "..",
+]

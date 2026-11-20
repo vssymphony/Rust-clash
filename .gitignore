@@ -1,0 +1,68 @@
+# 依赖与构建产物
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust / Tauri
+src-tauri/target
+src-tauri/gen
+
+# 内核二进制（体积大，需自行下载放置，详见 README）
+src-tauri/binaries/mihomo-*
+# wintun 驱动同理：由使用者按官网版本自行放入，不入库（发行签名与许可证均不应随仓库分发）
+src-tauri/binaries/wintun.dll
+!src-tauri/binaries/.gitkeep
+
+# 敏感环境变量与本地凭据（任何情况下都不得提交）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# 本地运行数据：配置、订阅缓存、数据库、日志（可能含订阅地址与 token，严禁入库）
+data/
+src-tauri/data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.redb
+config.yaml
+config.yml
+profiles.yaml
+profiles.yml
+cache.db
+*.mmdb
+
+# 密钥扫描与安全报告（含命中片段，不入库）
+gitleaks-report.json
+trufflehog-report.json
+.gitleaks-report/
+
+# 日志
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 打包产物
+release
+*.zip

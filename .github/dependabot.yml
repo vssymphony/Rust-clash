@@ -1,0 +1,125 @@
+# Dependabot：Rust / Node / GitHub Actions 三个生态的依赖更新
+#
+# 设计原则：
+#   - 每周一统一出 PR，避免每天刷屏；
+#   - 同一生态内按「关联性」分组（tauri 全家桶、react 全家桶等），
+#     减少「升了 tauri 但没升 tauri-build」这类拆散导致的 CI 红灯；
+#   - commit 前缀遵循 Conventional Commits（见 CONTRIBUTING.md），
+#     便于 CHANGELOG 归类；
+#   - 所有 PR 都会走 ci.yml（fmt / clippy / test / audit），合并前必须绿。
+version: 2
+updates:
+  # ------------------------------------------------------------ Rust 依赖
+  # Cargo.toml / Cargo.lock 位于 src-tauri/，必须以该目录为根
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - dependencies
+      - rust
+    groups:
+      # Tauri 及其官方插件必须整体升级：tauri / tauri-build / 插件版本互相约束
+      tauri:
+        patterns:
+          - "tauri*"
+      # 异步与网络栈
+      async-network:
+        patterns:
+          - "tokio*"
+          - "futures-*"
+          - "reqwest"
+          - "hyper*"
+          - "rustls*"
+      # 序列化 / 基础工具
+      serialization:
+        patterns:
+          - "serde*"
+          - "uuid"
+          - "base64"
+          - "thiserror"
+      # Windows 平台专用
+      windows:
+        patterns:
+          - "windows-*"
+          - "winreg"
+    ignore:
+      # 0.x 的破坏性变更频繁，且本项目大量 API 直接用到了 tauri 的 2.x 接口，
+      # 主版本升级统一人工评估（手动改 Cargo.toml），不交给 Dependabot。
+      - dependency-name: "tauri"
+        update-types: ["version-update:semver-major"]
+
+  # ------------------------------------------------------------ 前端依赖
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - dependencies
+      - javascript
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "@testing-library/*"
+      tauri-api:
+        patterns:
+          - "@tauri-apps/*"
+      # 构建与检查工具链：一起升级，避免 eslint / typescript-eslint 版本错配
+      tooling:
+        patterns:
+          - "eslint*"
+          - "@eslint/*"
+          - "typescript-eslint"
+          - "prettier"
+          - "typescript"
+          - "vite"
+          - "@vitejs/*"
+          - "vitest"
+          - "@vitest/*"
+          - "jsdom"
+          - "tailwindcss"
+          - "postcss"
+          - "autoprefixer"
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+
+  # ------------------------------------------------------------ Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+      include: scope
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions:
+        patterns:
+          - "*"
