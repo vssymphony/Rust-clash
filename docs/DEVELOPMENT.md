@@ -126,7 +126,8 @@ CI 上七个 job 与上表一一对应（见 `.github/workflows/ci.yml`），本
 ## 9. 规范约定
 
 - 代码风格：Rust 由 `rustfmt.toml`（`max_width = 100`）与 `clippy.toml` 约束，
-  `Cargo.toml` 的 `[lints]` 已开 `all` + `pedantic`；前端由 ESLint 9 + Prettier 3 约束。
+  `Cargo.toml` 的 `[lints]` 开启 `all`（warn，CI 再用 `-D warnings` 提升为错误），
+  `pedantic` 整体置为 `allow`（命令层与测试断言误报过多，理由见 `Cargo.toml` 注释）；前端由 ESLint 9 + Prettier 3 约束。
 - 版本号：`package.json` 为唯一权威来源，另外两处由 `npm run version:set` 同步，**不要手改**。
 - 变更日志：用户可见变更写入 `CHANGELOG.md` 的 `[Unreleased]`，发版时归档到版本段。
 - 依赖新增：需通过 `cargo deny check`（许可证白名单见 `deny.toml`），并在 PR 中说明理由。

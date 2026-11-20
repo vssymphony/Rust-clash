@@ -65,13 +65,14 @@ unused_must_use = "warn"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-# pedantic 中与 GUI/命令层代码形态天然冲突的几条降级，避免 -D warnings 误伤：
-module_name_repetitions = "allow"   # commands::xxx / storage::xxx 之类命名重复是刻意的模块切分
-missing_errors_doc = "allow"        # 内部函数不强制写 Errors 段
-missing_panics_doc = "allow"        # 同上
-must_use_candidate = "allow"        # 大量纯查询函数，逐个加 #[must_use] 反而噪音
-cast_precision_loss = "allow"       # 端口/百分比 u16→f64 的转换不可避免
+# pedantic 整体降级为 allow（而非逐条 allow）：
+#   本项目的 CLI/命令层与 tests/ 断言大量使用 `map(..).unwrap_or_default()`、
+#   `filter_map(|v| v.as_str())` 这类写法，pedantic 的 map_unwrap_or /
+#   redundant_closure_for_method_calls / option_if_let_else 会成片报错，
+#   与 CI 的 `-D warnings` 直接冲突，导致构建长期红灯而掩盖真实告警。
+#   `all` 组仍是 warn 并被 -D warnings 提升为错误，足以拦住真正的缺陷。
+#   如需引入 pedantic：先在 CI 观察一轮 `-W clippy::pedantic`，逐条 allow 后再提升为 warn。
+pedantic = { level = "allow", priority = -1 }
 
 [profile.release]
 # 发布包体积与调试符号的平衡：去掉符号表、开启 LTO，保留 panic 展开以生成崩溃提示。
