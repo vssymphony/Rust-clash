@@ -465,7 +465,8 @@ mod tests {
     #[test]
     fn legacy_settings_without_tun_fields_still_load() {
         // 模拟首版（不含 TUN）写入的配置文件。
-        let legacy = r#"{"mixedPort":7891,"controllerPort":9091,"mode":"global","logLevel":"debug"}"#;
+        let legacy =
+            r#"{"mixedPort":7891,"controllerPort":9091,"mode":"global","logLevel":"debug"}"#;
         let settings: AppSettings = serde_json::from_str(legacy).expect("旧配置应可加载");
         assert_eq!(settings.mixed_port, 7891);
         assert_eq!(settings.controller_port, 9091);
@@ -474,7 +475,10 @@ mod tests {
         assert!(!settings.tun_enabled, "旧配置不应默认开启 TUN");
         assert_eq!(settings.tun_stack, TunStack::Gvisor);
         assert_eq!(settings.tun_dns_hijack, vec!["any:53".to_string()]);
-        assert_eq!(settings.latency_test_url, "https://www.gstatic.com/generate_204");
+        assert_eq!(
+            settings.latency_test_url,
+            "https://www.gstatic.com/generate_204"
+        );
     }
 
     #[test]
@@ -486,8 +490,8 @@ mod tests {
         ] {
             let encoded = serde_json::to_value(stack).expect("枚举应可序列化");
             assert_eq!(encoded, serde_json::json!(expected));
-            let decoded: TunStack = serde_json::from_str(&format!("\"{expected}\""))
-                .expect("枚举应可反序列化");
+            let decoded: TunStack =
+                serde_json::from_str(&format!("\"{expected}\"")).expect("枚举应可反序列化");
             assert_eq!(decoded, stack);
             assert_eq!(stack.as_str(), expected);
             assert_eq!(TunStack::parse(expected), stack);
@@ -526,4 +530,3 @@ mod tests {
         assert_eq!(decoded.tun_dns_hijack, settings.tun_dns_hijack);
     }
 }
-

@@ -227,8 +227,9 @@ pub fn find_fixed_file_version(bytes: &[u8]) -> Option<(u16, u16)> {
                 if let Some(ms) = read_u32(bytes, index + 8) {
                     let major = (ms >> 16) as u16;
                     let minor = (ms & 0xffff) as u16;
-                    // wintun 版本号一定是 0.x / 1.x 这种量级，超过 99 基本是误命中
-                    if major > 0 && major < 100 {
+                    // wintun 正式版本就是 0.x（如 0.14.1 → (0, 14)），因此
+                    // major == 0 必须接受；超过 99 基本是误命中，仍然拒绝。
+                    if major < 100 {
                         return Some((major, minor));
                     }
                 }
@@ -283,7 +284,14 @@ pub fn is_forbidden_dir(dir: &Path) -> bool {
 
     let text = normalize(dir.to_string_lossy().as_ref());
 
-    for variable in ["APPDATA", "LOCALAPPDATA", "USERPROFILE", "TEMP", "TMP", "PROGRAMDATA"] {
+    for variable in [
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+        "TEMP",
+        "TMP",
+        "PROGRAMDATA",
+    ] {
         if let Ok(value) = std::env::var(variable) {
             let normalized = normalize(&value);
             if !normalized.is_empty() && text == normalized {
@@ -357,7 +365,11 @@ mod tests {
         let offset = pe_offset as usize;
         bytes[offset..offset + 4].copy_from_slice(b"PE\0\0");
         bytes[offset + 4..offset + 6].copy_from_slice(&machine.to_le_bytes());
-        let magic = if pe32_plus { PE32_PLUS_MAGIC } else { PE32_MAGIC };
+        let magic = if pe32_plus {
+            PE32_PLUS_MAGIC
+        } else {
+            PE32_MAGIC
+        };
         bytes[offset + 24..offset + 26].copy_from_slice(&magic.to_le_bytes());
         bytes
     }
@@ -409,7 +421,7 @@ mod tests {
             Err(WintunError::MachineMismatch { found, expected }) => {
                 assert_eq!(found, wrong);
                 assert_eq!(expected, expected_machine());
-            }
+            },
             other => panic!("应判定架构不匹配，实际 {other:?}"),
         }
     }
@@ -423,6 +435,28 @@ mod tests {
         assert_eq!(info.version, Some((0, 14)));
         assert_eq!(info.version_text(), "0.14");
         assert!(ensure_version(&info).is_ok());
+
+        // 仓库不收录真实的 wintun.dll（CI 只放 0 字节占位），因此这里对真实文件
+        // 的交叉校验必须"缺了就跳过"，不能断言失败；脚本构字节的断言在上面已完成。
+        let real_dll = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join(DLL_FILE_NAME);
+        let Ok(metadata) = std::fs::metadata(&real_dll) else {
+            eprintln!("跳过真实 dll 交叉校验：{} 不存在", real_dll.display());
+            return;
+        };
+        if metadata.len() < MIN_DLL_BYTES || metadata.len() > MAX_DLL_BYTES {
+            eprintln!(
+                "跳过真实 dll 交叉校验：{} 体积 {} 不在允许区间",
+                real_dll.display(),
+                metadata.len(),
+            );
+            return;
+        }
+        match validate_file(&real_dll) {
+            Ok(real) => assert!(real.version.is_some(), "真实 dll 应能解析出版本"),
+            Err(error) => eprintln!("跳过真实 dll 交叉校验：{error:?}"),
+        }
     }
 
     #[test]
@@ -498,7 +532,10 @@ mod tests {
 
     #[test]
     fn describe_candidates_is_readable() {
-        let files = vec![PathBuf::from(r"C:\a\wintun.dll"), PathBuf::from(r"C:\b\wintun.dll")];
+        let files = vec![
+            PathBuf::from(r"C:\a\wintun.dll"),
+            PathBuf::from(r"C:\b\wintun.dll"),
+        ];
         let text = describe_candidates(&files);
         assert!(text.contains(r"C:\a\wintun.dll"), "{text}");
         assert!(text.contains(r"C:\b\wintun.dll"), "{text}");

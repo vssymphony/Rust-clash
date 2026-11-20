@@ -32,7 +32,13 @@ tags = ["subscription", "secret"]
 [[rules]]
 id = "local-user-home-path"
 description = "本机用户目录绝对路径（泄露真实用户名与机器环境）"
-regex = '''(?:[A-Za-z]:\\{1,2}Users\\{1,2}|/home/|/Users/)(?!<|%|\$|\{|demo\b|Public\b|username\b)[A-Za-z0-9._-]{3,}'''
+#
+# 注：gitleaks 的正则引擎是 Go RE2，不支持负向前瞻 `(?!...)`，因此这里不能写排除式断言。
+# 占位用户名的排除改由下方 allowlist 的「家目录占位用户名」规则承担：
+# 规则本身只做「家目录前缀 + 合法用户名字符集」的正向匹配，
+# `C:\Users\%USERNAME%`、`C:\Users\<user>`、`/home/$USER` 这类占位因首字符不在
+# [A-Za-z0-9._-] 内而天然不匹配；`demo` / `Public` / `username` 等样例由 allowlist 放行。
+regex = '''(?:[A-Za-z]:\\{1,2}Users\\{1,2}|/home/|/Users/)[A-Za-z0-9._-]{3,}'''
 tags = ["privacy"]
 
 [[allowlists]]
@@ -53,6 +59,11 @@ regexes = [
   '''example\.net''',
   '''YOUR_TOKEN''',
   '''<YOUR_[A-Z_]+>''',
+  # 家目录占位用户名（demo / Public / username 等文档与测试样例，非真实用户），
+  # 用于替代 RE2 无法表达的负向前瞻排除。
+  '''[A-Za-z]:\\{1,2}Users\\{1,2}(?:Public|demo|username)(?:\\|$)''',
+  '''/home/(?:demo|username)(?:/|$)''',
+  '''/Users/(?:demo|username|Public)(?:/|$)''',
   # 保留地址与本地回环（项目内大量出现，均非真实外泄）
   '''\b127\.0\.0\.1\b''',
   '''\b0\.0\.0\.0\b''',

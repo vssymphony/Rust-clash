@@ -12,8 +12,14 @@ use crate::{commands, mihomo_guard};
 pub fn create(app: &AppHandle) -> AppResult<()> {
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)
         .map_err(|error| AppError::other(format!("创建托盘菜单项失败：{error}")))?;
-    let toggle_proxy = MenuItem::with_id(app, "toggle_proxy", "开启 / 关闭系统代理", true, None::<&str>)
-        .map_err(|error| AppError::other(format!("创建托盘菜单项失败：{error}")))?;
+    let toggle_proxy = MenuItem::with_id(
+        app,
+        "toggle_proxy",
+        "开启 / 关闭系统代理",
+        true,
+        None::<&str>,
+    )
+    .map_err(|error| AppError::other(format!("创建托盘菜单项失败：{error}")))?;
     let restart_kernel =
         MenuItem::with_id(app, "restart_kernel", "重启内核", true, None::<&str>)
             .map_err(|error| AppError::other(format!("创建托盘菜单项失败：{error}")))?;
@@ -86,28 +92,24 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                     state.system_proxy().enabled
                 };
                 if let Err(error) = commands::set_system_proxy(app.clone(), !enabled).await {
-                    let entry = LogEntry::app(
-                        "error",
-                        format!("切换系统代理失败：{error}"),
-                    );
+                    let entry = LogEntry::app("error", format!("切换系统代理失败：{error}"));
                     app.state::<AppState>().push_log(entry.clone());
                     let _ = app.emit(crate::clash_api::EVENT_LOG, entry);
                 }
             });
-        }
+        },
         "restart_kernel" => {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = mihomo_guard::restart_kernel(&app).await {
-                    let entry =
-                        LogEntry::app("error", format!("重启内核失败：{error}"));
+                    let entry = LogEntry::app("error", format!("重启内核失败：{error}"));
                     app.state::<AppState>().push_log(entry.clone());
                     // 与 toggle_proxy 保持一致：托盘触发的错误也要推给前端日志面板。
                     let _ = app.emit(crate::clash_api::EVENT_LOG, entry);
                 }
             });
-        }
+        },
         "quit" => crate::quit_app(app),
-        _ => {}
+        _ => {},
     }
 }

@@ -281,7 +281,9 @@ pub async fn proxy_group_delay(
 #[tauri::command]
 pub async fn get_connections(app: AppHandle) -> AppResult<Value> {
     let state = app.state::<AppState>();
-    clash_api::client_from_state(state.inner())?.connections().await
+    clash_api::client_from_state(state.inner())?
+        .connections()
+        .await
 }
 
 #[tauri::command]
@@ -330,10 +332,7 @@ pub fn list_subscriptions(app: AppHandle) -> AppResult<Vec<Subscription>> {
 }
 
 #[tauri::command]
-pub async fn add_subscription(
-    app: AppHandle,
-    input: SubscriptionInput,
-) -> AppResult<Subscription> {
+pub async fn add_subscription(app: AppHandle, input: SubscriptionInput) -> AppResult<Subscription> {
     subscription_service::import(&app, input).await
 }
 

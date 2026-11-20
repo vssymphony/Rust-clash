@@ -86,13 +86,16 @@ fn full_profile_with_tun_produces_expected_structure() {
         config
             .get("external-controller")
             .and_then(|value| value.as_str()),
-        Some("127.0.0.1:9097")
+        Some("127.0.0.1:9097"),
     );
     assert_eq!(
         config.get("secret").and_then(|value| value.as_str()),
         Some("ctl-secret")
     );
-    assert_eq!(config.get("mode").and_then(|value| value.as_str()), Some("global"));
+    assert_eq!(
+        config.get("mode").and_then(|value| value.as_str()),
+        Some("global")
+    );
 
     // 订阅内容原样保留
     let proxies = config
@@ -112,7 +115,10 @@ fn full_profile_with_tun_produces_expected_structure() {
 
     // TUN 段
     let tun = config.get("tun").expect("TUN 开启时应输出 tun 段");
-    assert_eq!(tun.get("enable").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        tun.get("enable").and_then(|value| value.as_bool()),
+        Some(true)
+    );
     assert_eq!(
         tun.get("stack").and_then(|value| value.as_str()),
         Some("system")
@@ -120,7 +126,7 @@ fn full_profile_with_tun_produces_expected_structure() {
     assert_eq!(
         tun.get("device").and_then(|value| value.as_str()),
         Some("CustomTun"),
-        "自定义设备名应被采用"
+        "自定义设备名应被采用",
     );
     let hijack: Vec<&str> = tun
         .get("dns-hijack")
@@ -157,7 +163,7 @@ fn tun_disabled_keeps_system_proxy_only_shape() {
             .and_then(|value| value.as_sequence())
             .map(|items| items.len()),
         Some(2),
-        "订阅的 dns.nameserver 应原样保留"
+        "订阅的 dns.nameserver 应原样保留",
     );
 }
 
@@ -179,10 +185,7 @@ proxies:
     let config = build(&settings, Some(profile_without_dns));
 
     let dns = config.get("dns").expect("应生成默认 dns 段");
-    assert!(
-        dns.get("nameserver").is_some(),
-        "TUN 模式必须给出可用 DNS"
-    );
+    assert!(dns.get("nameserver").is_some(), "TUN 模式必须给出可用 DNS");
     assert_eq!(
         dns.get("enhanced-mode").and_then(|value| value.as_str()),
         Some("fake-ip")
@@ -230,7 +233,7 @@ fn generated_yaml_is_reparsable_and_stable() {
             .get("tun")
             .and_then(|tun| tun.get("stack"))
             .and_then(|stack| stack.as_str()),
-        Some("mixed")
+        Some("mixed"),
     );
     assert!(
         !first.contains("!!"),
@@ -262,7 +265,7 @@ fn baseline_ports_mode_and_log_level_follow_settings() {
         config
             .get("external-controller")
             .and_then(|value| value.as_str()),
-        Some("127.0.0.1:9099")
+        Some("127.0.0.1:9099"),
     );
     assert_eq!(
         config.get("mode").and_then(|value| value.as_str()),
@@ -271,7 +274,7 @@ fn baseline_ports_mode_and_log_level_follow_settings() {
     assert_eq!(
         config.get("log-level").and_then(|value| value.as_str()),
         Some("debug"),
-        "日志级别应来自 AppSettings，且与 LogLevel::as_str 一致"
+        "日志级别应来自 AppSettings，且与 LogLevel::as_str 一致",
     );
     assert_eq!(
         config.get("allow-lan").and_then(|value| value.as_bool()),
@@ -302,7 +305,7 @@ fn every_tun_stack_variant_serializes_to_its_own_name() {
                 .and_then(|tun| tun.get("stack"))
                 .and_then(|value| value.as_str()),
             Some(expected),
-            "协议栈 {expected} 应原样写入配置"
+            "协议栈 {expected} 应原样写入配置",
         );
     }
 }
@@ -417,7 +420,7 @@ proxies:
         off.get("dns")
             .and_then(|dns| dns.get("enable"))
             .and_then(|value| value.as_bool()),
-        Some(false)
+        Some(false),
     );
 
     let on = AppSettings {
@@ -429,13 +432,13 @@ proxies:
     assert_eq!(
         dns.get("enable").and_then(|value| value.as_bool()),
         Some(true),
-        "TUN 下 DNS 必须启用"
+        "TUN 下 DNS 必须启用",
     );
     assert_eq!(
         dns.get("nameserver")
             .and_then(|value| value.as_sequence())
             .map(|items| items.len()),
         Some(1),
-        "订阅原有 nameserver 不应被覆盖"
+        "订阅原有 nameserver 不应被覆盖",
     );
 }

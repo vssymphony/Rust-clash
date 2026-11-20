@@ -176,14 +176,17 @@ pub async fn start_kernel(app: &AppHandle) -> AppResult<()> {
             state.set_kernel_status(KernelStatus::failed(message.clone()));
             emit_status(app);
             return Err(AppError::KernelStart(message));
-        }
+        },
     };
 
     let pid = child.pid();
     app.state::<KernelSupervisor>().set_child(child);
     state.push_log(LogEntry::app(
         "info",
-        format!("内核进程已拉起，PID {pid}，工作目录 {}", paths.data_display()),
+        format!(
+            "内核进程已拉起，PID {pid}，工作目录 {}",
+            paths.data_display()
+        ),
     ));
 
     // 健康检查：轮询 /version 直到内核可用或进程先退出。
@@ -230,7 +233,7 @@ pub async fn start_kernel(app: &AppHandle) -> AppResult<()> {
             "内核启动成功：{}，混合端口 {}，控制端口 {}",
             version.unwrap_or_else(|| "未知版本".to_string()),
             settings.mixed_port,
-            settings.controller_port
+            settings.controller_port,
         ),
     ));
     emit_status(app);
@@ -241,7 +244,11 @@ pub async fn start_kernel(app: &AppHandle) -> AppResult<()> {
 }
 
 /// 消费内核输出流并在进程退出后做重启判定。
-fn drain_events(app: AppHandle, mut receiver: tokio::sync::mpsc::Receiver<CommandEvent>, passive: bool) {
+fn drain_events(
+    app: AppHandle,
+    mut receiver: tokio::sync::mpsc::Receiver<CommandEvent>,
+    passive: bool,
+) {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = receiver.recv().await {
             match event {
@@ -251,12 +258,15 @@ fn drain_events(app: AppHandle, mut receiver: tokio::sync::mpsc::Receiver<Comman
                     forward_log(
                         &app,
                         "warning",
-                        format!("内核进程退出：code={:?} signal={:?}", payload.code, payload.signal)
-                            .as_bytes(),
+                        format!(
+                            "内核进程退出：code={:?} signal={:?}",
+                            payload.code, payload.signal
+                        )
+                        .as_bytes(),
                     );
-                }
+                },
                 CommandEvent::Error(error) => forward_log(&app, "error", error.as_bytes()),
-                _ => {}
+                _ => {},
             }
         }
         if !passive {
@@ -316,7 +326,9 @@ async fn wait_port_released(app: &AppHandle) {
     let state = app.state::<AppState>();
     let port = state.settings_snapshot().controller_port;
     for _ in 0..20 {
-        let in_use = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok();
+        let in_use = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok();
         if !in_use {
             return;
         }
@@ -348,9 +360,11 @@ async fn handle_unexpected_exit(app: &AppHandle) {
         return;
     }
 
-    let mut status = KernelStatus::default();
-    status.kind = KernelStatusKind::Restarting;
-    status.message = Some(format!("内核异常退出，正在进行第 {count} 次自动重启"));
+    let status = KernelStatus {
+        kind: KernelStatusKind::Restarting,
+        message: Some(format!("内核异常退出，正在进行第 {count} 次自动重启")),
+        ..Default::default()
+    };
     state.set_kernel_status(status);
     emit_status(app);
 
@@ -399,13 +413,15 @@ fn detect_level(line: &str) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    Some(match raw.as_str() {
-        "warning" | "warn" => "warning",
-        "error" | "fatal" => "error",
-        "debug" => "debug",
-        _ => "info",
-    }
-    .to_string())
+    Some(
+        match raw.as_str() {
+            "warning" | "warn" => "warning",
+            "error" | "fatal" => "error",
+            "debug" => "debug",
+            _ => "info",
+        }
+        .to_string(),
+    )
 }
 
 pub fn emit_status(app: &AppHandle) {
@@ -419,7 +435,12 @@ pub fn persist_log_tail(app: &AppHandle) {
     let logs = state.recent_logs(200);
     let content = logs
         .iter()
-        .map(|entry| format!("[{}][{}][{}] {}", entry.time, entry.source, entry.level, entry.message))
+        .map(|entry| {
+            format!(
+                "[{}][{}][{}] {}",
+                entry.time, entry.source, entry.level, entry.message
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let path = state.paths.data_dir.join("last-session.log");

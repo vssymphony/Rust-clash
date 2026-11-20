@@ -64,7 +64,8 @@ impl AppPaths {
     /// 原样拼接时 `../../settings.json` 这类 id 能把文件写出 profiles 目录之外。
     /// 这里统一经 [`sanitize_id`] 清洗后再拼路径。
     pub fn profile_file(&self, subscription_id: &str) -> PathBuf {
-        self.profiles_dir.join(format!("{}.yaml", sanitize_id(subscription_id)))
+        self.profiles_dir
+            .join(format!("{}.yaml", sanitize_id(subscription_id)))
     }
 
     /// 用于展示的配置路径（转义为 `\` 以便 Windows 前端展示一致）。
@@ -250,7 +251,13 @@ mod tests {
 
     #[test]
     fn sanitize_blocks_path_traversal() {
-        for raw in ["../settings", "..\\..\\evil", "C:\\Windows\\x", "a/b", "a\\b"] {
+        for raw in [
+            "../settings",
+            "..\\..\\evil",
+            "C:\\Windows\\x",
+            "a/b",
+            "a\\b",
+        ] {
             let safe = sanitize_id(raw);
             assert!(!safe.contains('/'), "仍含 /: {safe}");
             assert!(!safe.contains('\\'), "仍含 \\: {safe}");
@@ -273,7 +280,11 @@ mod tests {
         let paths = paths_under(Path::new("C:\\cfg"));
         let file = paths.profile_file("../../../settings.json");
         assert_eq!(file.parent().unwrap(), paths.profiles_dir.as_path());
-        assert!(file.file_name().unwrap().to_string_lossy().ends_with(".yaml"));
+        assert!(file
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(".yaml"));
     }
 
     #[test]
@@ -296,7 +307,11 @@ mod tests {
         write_sensitive(&file, "v2").expect("覆盖写入应成功");
         assert_eq!(fs::read_to_string(&file).unwrap(), "v2");
         let backup = dir.join("settings.json.bak");
-        assert_eq!(fs::read_to_string(&backup).unwrap(), "v1", "应保留上一版备份");
+        assert_eq!(
+            fs::read_to_string(&backup).unwrap(),
+            "v1",
+            "应保留上一版备份"
+        );
 
         // 不应残留任何临时文件
         let leftovers: Vec<String> = fs::read_dir(&dir)

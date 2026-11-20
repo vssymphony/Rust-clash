@@ -84,11 +84,11 @@ mod platform {
     use std::path::PathBuf;
 
     use serde::{Deserialize, Serialize};
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
-    use winreg::RegKey;
     use windows_sys::Win32::Networking::WinInet::{
         InternetSetOptionW, INTERNET_OPTION_REFRESH, INTERNET_OPTION_SETTINGS_CHANGED,
     };
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::RegKey;
 
     use super::*;
 
@@ -128,7 +128,9 @@ mod platform {
     fn open_key() -> AppResult<RegKey> {
         RegKey::predef(HKEY_CURRENT_USER)
             .open_subkey_with_flags(INTERNET_SETTINGS, KEY_READ | KEY_WRITE)
-            .map_err(|error| AppError::SysProxy(format!("打开注册表 Internet Settings 失败：{error}")))
+            .map_err(|error| {
+                AppError::SysProxy(format!("打开注册表 Internet Settings 失败：{error}"))
+            })
     }
 
     /// 通知 WinINet 立即重新读取注册表，否则部分程序要等注销才生效。
@@ -198,20 +200,22 @@ mod platform {
                         let _ = key.set_value("ProxyServer", &server);
                         let _ = key.set_value(
                             "ProxyOverride",
-                            &backup.proxy_override.unwrap_or_else(|| "<local>".to_string()),
+                            &backup
+                                .proxy_override
+                                .unwrap_or_else(|| "<local>".to_string()),
                         );
-                    }
+                    },
                     None => {
                         let _ = key.delete_value("ProxyServer");
                         let _ = key.delete_value("ProxyOverride");
-                    }
+                    },
                 }
                 let _ = key.set_value("ProxyEnable", &backup.proxy_enable);
                 remove_backup(app);
-            }
+            },
             None => {
                 let _ = key.set_value("ProxyEnable", &0u32);
-            }
+            },
         }
 
         refresh_internet_options();
@@ -381,13 +385,13 @@ mod platform {
                         section_end += 1;
                     }
                 }
-            }
+            },
             None => {
                 lines.push(header);
                 for (key, value) in entries {
                     lines.push(format!("{key}={value}"));
                 }
-            }
+            },
         }
 
         let mut content = lines.join("\n");

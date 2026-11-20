@@ -65,19 +65,20 @@ pub fn parse_profile(content: &str, user_info: Option<String>) -> AppResult<Prof
                 Some(text) => parse_profile_raw(&text, user_info),
                 None => Err(first_error),
             }
-        }
+        },
     }
 }
 
 fn parse_profile_raw(content: &str, user_info: Option<String>) -> AppResult<ProfileContent> {
-    let value: Value = serde_yaml::from_str(content)
-        .map_err(|error| AppError::Subscription(format!("订阅内容不是合法的 Clash YAML：{error}")))?;
+    let value: Value = serde_yaml::from_str(content).map_err(|error| {
+        AppError::Subscription(format!("订阅内容不是合法的 Clash YAML：{error}"))
+    })?;
 
     let mapping = value
         .as_mapping()
         .ok_or_else(|| AppError::Subscription("订阅内容不是 YAML 映射结构".to_string()))?;
 
-    let proxies: Vec<Value> = as_sequence(mapping.get(&key("proxies")))
+    let proxies: Vec<Value> = as_sequence(mapping.get(key("proxies")))
         .into_iter()
         .filter(|proxy| {
             proxy
@@ -94,9 +95,9 @@ fn parse_profile_raw(content: &str, user_info: Option<String>) -> AppResult<Prof
         ));
     }
 
-    let proxy_groups = as_sequence(mapping.get(&key("proxy-groups")));
-    let rules = as_sequence(mapping.get(&key("rules")));
-    let dns = mapping.get(&key("dns")).cloned();
+    let proxy_groups = as_sequence(mapping.get(key("proxy-groups")));
+    let rules = as_sequence(mapping.get(key("rules")));
+    let dns = mapping.get(key("dns")).cloned();
 
     Ok(ProfileContent {
         proxies,
@@ -183,10 +184,10 @@ fn build_tun(settings: &AppSettings) -> Value {
 fn ensure_dns_for_tun(dns: &mut Value) {
     if let Value::Mapping(map) = dns {
         map.insert(key("enable"), Value::from(true));
-        if !map.contains_key(&key("enhanced-mode")) {
+        if !map.contains_key(key("enhanced-mode")) {
             map.insert(key("enhanced-mode"), Value::from("fake-ip"));
         }
-        if !map.contains_key(&key("fake-ip-range")) {
+        if !map.contains_key(key("fake-ip-range")) {
             map.insert(key("fake-ip-range"), Value::from("198.18.0.1/16"));
         }
     } else {
@@ -295,9 +296,7 @@ pub fn build_config(settings: &AppSettings, profile: Option<&ProfileContent>) ->
     root.insert(key("dns"), dns);
 
     // 节点与策略组
-    let proxies = profile
-        .map(|item| item.proxies.clone())
-        .unwrap_or_default();
+    let proxies = profile.map(|item| item.proxies.clone()).unwrap_or_default();
     root.insert(key("proxies"), Value::Sequence(proxies));
 
     let groups = match profile {
@@ -375,16 +374,19 @@ proxies:
         let config = config_of(&settings, None);
         let tun = tun_of(&config).expect("TUN 开启时应输出 tun 段");
 
-        assert_eq!(tun.get("enable").and_then(|value| value.as_bool()), Some(true));
+        assert_eq!(
+            tun.get("enable").and_then(|value| value.as_bool()),
+            Some(true)
+        );
         assert_eq!(
             tun.get("stack").and_then(|value| value.as_str()),
             Some("gvisor"),
-            "默认协议栈应为 gvisor"
+            "默认协议栈应为 gvisor",
         );
         assert_eq!(
             tun.get("device").and_then(|value| value.as_str()),
             Some(crate::tun::effective_device(&settings).as_str()),
-            "设备名应与 tun::effective_device 一致"
+            "设备名应与 tun::effective_device 一致",
         );
         assert_eq!(
             tun.get("auto-route").and_then(|value| value.as_bool()),
@@ -409,7 +411,7 @@ proxies:
             assert_eq!(
                 tun.get("stack").and_then(|value| value.as_str()),
                 Some(expected),
-                "枚举 {stack:?} 应渲染为 {expected}"
+                "枚举 {stack:?} 应渲染为 {expected}",
             );
         }
     }
@@ -469,12 +471,9 @@ proxies:
         assert_eq!(
             dns.get("enhanced-mode").and_then(|value| value.as_str()),
             Some("fake-ip"),
-            "TUN 需要 fake-ip 才能劫持 DNS"
+            "TUN 需要 fake-ip 才能劫持 DNS",
         );
-        assert!(
-            dns.get("fake-ip-range").is_some(),
-            "应补齐 fake-ip-range"
-        );
+        assert!(dns.get("fake-ip-range").is_some(), "应补齐 fake-ip-range");
     }
 
     #[test]
@@ -501,7 +500,7 @@ dns:
         assert_eq!(
             dns.get("enhanced-mode").and_then(|value| value.as_str()),
             Some("fake-ip"),
-            "订阅自带 dns 时也应补齐 enhanced-mode"
+            "订阅自带 dns 时也应补齐 enhanced-mode",
         );
         let nameservers = dns
             .get("nameserver")
@@ -530,7 +529,7 @@ dns:
             config
                 .get("external-controller")
                 .and_then(|value| value.as_str()),
-            Some("127.0.0.1:9097")
+            Some("127.0.0.1:9097"),
         );
         assert_eq!(
             config.get("secret").and_then(|value| value.as_str()),
@@ -583,7 +582,7 @@ rules:
             .expect("应输出默认 rules");
         let texts: Vec<&str> = rules.iter().filter_map(|value| value.as_str()).collect();
         assert!(
-            texts.iter().any(|rule| *rule == "MATCH,DIRECT"),
+            texts.contains(&"MATCH,DIRECT"),
             "无订阅时应直连兜底: {texts:?}"
         );
     }
@@ -593,9 +592,9 @@ rules:
         let profile = parse_profile(MINIMAL_PROFILE, None).expect("订阅解析应成功");
         assert_eq!(profile.proxies.len(), 1);
         assert!(profile.rules.is_empty(), "订阅未提供 rules 时应为空");
-        assert!(profile.proxy_groups.is_empty(), "订阅未提供 proxy-groups 时应为空");
+        assert!(
+            profile.proxy_groups.is_empty(),
+            "订阅未提供 proxy-groups 时应为空"
+        );
     }
 }
-
-
-

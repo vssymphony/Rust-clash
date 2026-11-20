@@ -79,7 +79,12 @@ pub async fn fetch_remote(url: &str) -> AppResult<(String, Option<String>)> {
 }
 
 async fn load_source(input: &SubscriptionInput) -> AppResult<(String, Option<String>)> {
-    if let Some(url) = input.url.as_ref().map(|url| url.trim()).filter(|url| !url.is_empty()) {
+    if let Some(url) = input
+        .url
+        .as_ref()
+        .map(|url| url.trim())
+        .filter(|url| !url.is_empty())
+    {
         return fetch_remote(url).await;
     }
 
@@ -172,12 +177,12 @@ pub async fn refresh(app: &AppHandle, id: &str) -> AppResult<Subscription> {
                     AppError::Subscription(format!("读取本地订阅文件失败：{error}"))
                 })?;
                 (content, existing.user_info.clone())
-            }
+            },
             None => {
                 return Err(AppError::Subscription(
                     "该订阅没有可用的更新来源".to_string(),
                 ))
-            }
+            },
         },
     };
 
@@ -200,7 +205,10 @@ pub async fn refresh(app: &AppHandle, id: &str) -> AppResult<Subscription> {
 
     state.push_log(LogEntry::app(
         "info",
-        format!("订阅「{}」已更新，节点数 {}", updated.name, updated.node_count),
+        format!(
+            "订阅「{}」已更新，节点数 {}",
+            updated.name, updated.node_count
+        ),
     ));
 
     if state.settings_snapshot().current_subscription_id.as_deref() == Some(id) {
@@ -277,14 +285,14 @@ pub async fn apply_current(app: &AppHandle) -> AppResult<()> {
         Ok(client) => match client.reload_config(&path).await {
             Ok(()) => {
                 state.push_log(LogEntry::app("info", "内核配置已热重载"));
-            }
+            },
             Err(error) => {
                 state.push_log(LogEntry::app(
                     "warning",
                     format!("热重载失败（{error}），改为重启内核"),
                 ));
                 mihomo_guard::restart_kernel(app).await?;
-            }
+            },
         },
         Err(error) => {
             state.push_log(LogEntry::app(
@@ -292,7 +300,7 @@ pub async fn apply_current(app: &AppHandle) -> AppResult<()> {
                 format!("构造 API 客户端失败（{error}），改为重启内核"),
             ));
             mihomo_guard::restart_kernel(app).await?;
-        }
+        },
     }
 
     Ok(())
@@ -329,8 +337,10 @@ pub fn spawn_auto_update(app: AppHandle) {
 
             for id in pending {
                 if let Err(error) = refresh(&app, &id).await {
-                    app.state::<AppState>()
-                        .push_log(LogEntry::app("warning", format!("订阅自动更新失败：{error}")));
+                    app.state::<AppState>().push_log(LogEntry::app(
+                        "warning",
+                        format!("订阅自动更新失败：{error}"),
+                    ));
                 }
             }
         }

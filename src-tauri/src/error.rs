@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(AppError::KernelNotRunning.to_string(), "内核未运行");
         assert_eq!(
             AppError::Config("missing port".to_string()).to_string(),
-            "配置错误：missing port"
+            "配置错误：missing port",
         );
         assert_eq!(
             AppError::NoProxies.to_string(),
@@ -121,8 +121,8 @@ mod tests {
 
     #[test]
     fn serializes_as_plain_string() {
-        let encoded = serde_json::to_string(&AppError::Api("timeout".to_string()))
-            .expect("错误应可序列化");
+        let encoded =
+            serde_json::to_string(&AppError::Api("timeout".to_string())).expect("错误应可序列化");
         assert_eq!(encoded, "\"Clash API 请求失败：timeout\"");
         assert!(
             !encoded.contains('{'),

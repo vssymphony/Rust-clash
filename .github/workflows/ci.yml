@@ -167,6 +167,14 @@ jobs:
           mkdir -p src-tauri/binaries
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             : > src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe
+            # tauri.windows.conf.json 的 bundle.resources 把 binaries/wintun.dll
+            # 映射到安装根目录，tauri-build 在编译期会校验该资源是否存在：
+            # 缺失时报 "resource path binaries\wintun.dll doesn't exist" 并以 101 退出，
+            # 导致 rust-clippy / rust-test 在 Windows 上必然失败。
+            # 仓库不收录真实 dll（见 .gitignore），这里放 0 字节占位只为让编译期校验通过；
+            # 本工作流不产出安装包，发行包由 release.yml 用真实 dll 或显式
+            # CLASH_GUI_SKIP_WINTUN 策略处理。
+            : > src-tauri/binaries/wintun.dll
           else
             : > src-tauri/binaries/mihomo-x86_64-unknown-linux-gnu
           fi
@@ -264,6 +272,14 @@ jobs:
           mkdir -p src-tauri/binaries
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             : > src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe
+            # tauri.windows.conf.json 的 bundle.resources 把 binaries/wintun.dll
+            # 映射到安装根目录，tauri-build 在编译期会校验该资源是否存在：
+            # 缺失时报 "resource path binaries\wintun.dll doesn't exist" 并以 101 退出，
+            # 导致 rust-clippy / rust-test 在 Windows 上必然失败。
+            # 仓库不收录真实 dll（见 .gitignore），这里放 0 字节占位只为让编译期校验通过；
+            # 本工作流不产出安装包，发行包由 release.yml 用真实 dll 或显式
+            # CLASH_GUI_SKIP_WINTUN 策略处理。
+            : > src-tauri/binaries/wintun.dll
           else
             : > src-tauri/binaries/mihomo-x86_64-unknown-linux-gnu
           fi

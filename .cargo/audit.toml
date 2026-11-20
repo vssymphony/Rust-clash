@@ -21,4 +21,7 @@ ignore = [
 [output]
 # 有漏洞时安静输出精简摘要即可，详细 JSON 由 CI artifact 保存的日志承担
 quiet = false
-deny = "warnings"
+# cargo-audit 的 output.deny 是字符串数组（severity / 类别），不是单个字符串；
+# 写成 "warnings" 会在解析配置时报 invalid type: string, expected a sequence。
+# 可选值：vulnerability / unsound / yanked / unmaintained / warnings / informational。
+deny = ["warnings"]

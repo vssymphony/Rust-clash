@@ -26,18 +26,8 @@ pub const MASK: &str = "***";
 
 /// 敏感键名（小写后"包含"即判定为敏感，覆盖 token / access_token / sub_token 等变体）。
 const SENSITIVE_KEY_PARTS: [&str; 12] = [
-    "token",
-    "secret",
-    "password",
-    "passwd",
-    "pwd",
-    "apikey",
-    "api_key",
-    "auth",
-    "sign",
-    "uuid",
-    "sid",
-    "sub_url",
+    "token", "secret", "password", "passwd", "pwd", "apikey", "api_key", "auth", "sign", "uuid",
+    "sid", "sub_url",
 ];
 
 /// 对一段自由文本做脱敏：先处理其中的 URL（含 userinfo / query），
@@ -63,9 +53,7 @@ pub fn redact_url(url: &str) -> String {
     out.push_str(scheme);
 
     // 2) authority（到第一个 '/' '?' '#' 为止）
-    let authority_end = rest
-        .find(['/', '?', '#'])
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(authority_end);
 
     match authority.rsplit_once('@') {
@@ -81,7 +69,7 @@ pub fn redact_url(url: &str) -> String {
             }
             out.push('@');
             out.push_str(host);
-        }
+        },
         None => out.push_str(authority),
     }
 
@@ -99,7 +87,7 @@ pub fn redact_url(url: &str) -> String {
             if let Some(fragment) = fragment {
                 out.push_str(fragment);
             }
-        }
+        },
         None => out.push_str(tail),
     }
 
@@ -126,7 +114,7 @@ fn redact_query(query: &str) -> String {
                 out.push_str(key);
                 out.push('=');
                 out.push_str(MASK);
-            }
+            },
             _ => out.push_str(pair),
         }
     }
@@ -146,11 +134,11 @@ fn redact_urls(text: &str) -> String {
                 let end = url_end(text, absolute_start);
                 out.push_str(&redact_url(&text[absolute_start..end]));
                 cursor = end;
-            }
+            },
             None => {
                 out.push_str(&text[cursor..]);
                 break;
-            }
+            },
         }
     }
 
@@ -207,10 +195,16 @@ fn redact_key_values(text: &str) -> String {
         }
 
         let key = &text[key_start..index];
-        // 值：向右到分隔符为止
+        // 值：向右到分隔符为止。这里按字符（而非按字节）推进：
+        // `password=密码` 这类值仍需脱敏，但 `token=ab，请检查` 中的中文标点
+        // 必须终止值边界，否则后面的正常文本会被整段吞进占位符。
         let mut value_end = index + 1;
         while value_end < bytes.len() && !is_value_stop_byte(bytes[value_end]) {
-            value_end += 1;
+            match text[value_end..].chars().next() {
+                Some(ch) if !ch.is_ascii() && !ch.is_alphanumeric() => break,
+                Some(ch) => value_end += ch.len_utf8(),
+                None => break,
+            }
         }
 
         if value_end > index + 1 && is_sensitive_key(key) {
@@ -285,7 +279,8 @@ mod tests {
 
     #[test]
     fn redacts_subscription_query_token() {
-        let raw = "拉取订阅：https://sub.example.com/api/v1/client/subscribe?token=abcd1234&flag=clash";
+        let raw =
+            "拉取订阅：https://sub.example.com/api/v1/client/subscribe?token=abcd1234&flag=clash";
         let masked = redact_text(raw);
         assert!(!masked.contains("abcd1234"), "token 未被脱敏：{masked}");
         assert!(masked.contains("token=***"), "键名应保留：{masked}");
@@ -296,7 +291,10 @@ mod tests {
     #[test]
     fn redacts_url_userinfo_password_only() {
         let masked = redact_url("https://alice:s3cr3t@proxy.example.com:8443/path?secret=x");
-        assert!(masked.starts_with("https://alice:***@proxy.example.com:8443/path"), "{masked}");
+        assert!(
+            masked.starts_with("https://alice:***@proxy.example.com:8443/path"),
+            "{masked}"
+        );
         assert!(!masked.contains("s3cr3t"), "{masked}");
         assert!(masked.contains("secret=***"), "{masked}");
     }
@@ -324,9 +322,7 @@ mod tests {
 
     #[test]
     fn handles_multiple_urls_and_empty_input() {
-        let masked = redact_text(
-            "a=https://x/sub?token=1 b=https://y/sub?token=2 结束",
-        );
+        let masked = redact_text("a=https://x/sub?token=1 b=https://y/sub?token=2 结束");
         assert_eq!(masked.matches("token=***").count(), 2, "{masked}");
         assert!(!masked.contains("token=1"), "{masked}");
         assert!(!masked.contains("token=2"), "{masked}");

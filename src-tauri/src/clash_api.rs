@@ -94,15 +94,18 @@ impl ClashClient {
     }
 
     pub async fn version(&self) -> AppResult<Value> {
-        self.send(self.request(reqwest::Method::GET, "/version")).await
+        self.send(self.request(reqwest::Method::GET, "/version"))
+            .await
     }
 
     pub async fn proxies(&self) -> AppResult<Value> {
-        self.send(self.request(reqwest::Method::GET, "/proxies")).await
+        self.send(self.request(reqwest::Method::GET, "/proxies"))
+            .await
     }
 
     pub async fn rules(&self) -> AppResult<Value> {
-        self.send(self.request(reqwest::Method::GET, "/rules")).await
+        self.send(self.request(reqwest::Method::GET, "/rules"))
+            .await
     }
 
     pub async fn connections(&self) -> AppResult<Value> {
@@ -175,13 +178,17 @@ impl ClashClient {
     }
 
     pub async fn get_configs(&self) -> AppResult<Value> {
-        self.send(self.request(reqwest::Method::GET, "/configs")).await
+        self.send(self.request(reqwest::Method::GET, "/configs"))
+            .await
     }
 
     pub async fn patch_configs(&self, patch: Value) -> AppResult<()> {
-        self.send(self.request(reqwest::Method::PATCH, "/configs").json(&patch))
-            .await
-            .map(|_| ())
+        self.send(
+            self.request(reqwest::Method::PATCH, "/configs")
+                .json(&patch),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// 让内核重新加载配置文件。
@@ -208,7 +215,7 @@ fn urlencode(input: &str) -> String {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(*byte as char)
-            }
+            },
             _ => out.push_str(&format!("%{:02X}", byte)),
         }
     }
@@ -234,7 +241,11 @@ pub fn spawn_ws_task(app: AppHandle, path: &'static str) {
                 let state = app.state::<AppState>();
                 let settings = state.settings_snapshot();
                 let running = state.kernel_status().is_running();
-                (settings.controller_port, settings.controller_secret, running)
+                (
+                    settings.controller_port,
+                    settings.controller_secret,
+                    running,
+                )
             };
 
             if !running {
@@ -251,11 +262,11 @@ pub fn spawn_ws_task(app: AppHandle, path: &'static str) {
                         }
                     }
                     request
-                }
+                },
                 Err(_) => {
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
-                }
+                },
             };
 
             match tokio_tungstenite::connect_async(request).await {
@@ -266,21 +277,21 @@ pub fn spawn_ws_task(app: AppHandle, path: &'static str) {
                         match socket.next().await {
                             Some(Ok(Message::Text(text))) => {
                                 dispatch(&app, path, text.to_string());
-                            }
+                            },
                             Some(Ok(Message::Binary(bytes))) => {
                                 dispatch(&app, path, String::from_utf8_lossy(&bytes).to_string());
-                            }
+                            },
                             Some(Ok(Message::Close(_))) => break,
-                            Some(Ok(_)) => {}
+                            Some(Ok(_)) => {},
                             Some(Err(_)) => break,
                             None => break,
                         }
                     }
-                }
+                },
                 Err(error) => {
                     failures = failures.saturating_add(1);
                     // 只在首次失败与每 10 次失败时记录，避免重连噪声淹没真正的错误。
-                    if failures == 1 || failures % 10 == 0 {
+                    if failures == 1 || failures.is_multiple_of(10) {
                         let state = app.state::<AppState>();
                         state.push_log(LogEntry::app(
                             "debug",
@@ -289,7 +300,7 @@ pub fn spawn_ws_task(app: AppHandle, path: &'static str) {
                             ),
                         ));
                     }
-                }
+                },
             }
 
             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
@@ -306,7 +317,10 @@ fn dispatch(app: &AppHandle, path: &str, payload: String) {
                 Err(_) => return,
             };
             let up = value.get("up").and_then(|item| item.as_u64()).unwrap_or(0);
-            let down = value.get("down").and_then(|item| item.as_u64()).unwrap_or(0);
+            let down = value
+                .get("down")
+                .and_then(|item| item.as_u64())
+                .unwrap_or(0);
 
             let sample = {
                 let state = app.state::<AppState>();
@@ -314,12 +328,11 @@ fn dispatch(app: &AppHandle, path: &str, payload: String) {
             };
 
             let _ = app.emit(EVENT_TRAFFIC, sample);
-        }
-        "/connections" => match serde_json::from_str::<Value>(&payload) {
-            Ok(value) => {
+        },
+        "/connections" => {
+            if let Ok(value) = serde_json::from_str::<Value>(&payload) {
                 let _ = app.emit(EVENT_CONNECTIONS, value);
             }
-            Err(_) => {}
         },
         "/logs" => {
             let value: Value = match serde_json::from_str(&payload) {
@@ -345,8 +358,8 @@ fn dispatch(app: &AppHandle, path: &str, payload: String) {
                 state.push_log(entry.clone());
             }
             let _ = app.emit(EVENT_LOG, entry);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 

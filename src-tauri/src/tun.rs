@@ -107,7 +107,8 @@ pub async fn current_state(app: &AppHandle) -> TunState {
         _ => None,
     };
 
-    let active = kernel_enable.unwrap_or_else(|| settings.tun_enabled && running && ready(&privilege));
+    let active =
+        kernel_enable.unwrap_or_else(|| settings.tun_enabled && running && ready(&privilege));
 
     let message = build_message(&settings, &privilege, running, active);
 
@@ -300,7 +301,7 @@ mod platform {
                 Ok(info) => return WintunProbe::Ready(path, info),
                 Err(error) => {
                     last_error = Some(format!("{}：{}", path.display(), error.message()));
-                }
+                },
             }
         }
         match last_error {
