@@ -47,7 +47,7 @@ jobs:
     name: secret-scan (gitleaks)
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout（fetch-depth: 0 保证扫描全部历史）
+      - name: "Checkout（fetch-depth: 0 保证扫描全部历史）"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
