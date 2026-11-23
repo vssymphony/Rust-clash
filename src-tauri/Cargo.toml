@@ -33,7 +33,7 @@ serde_yaml = "0.9"
 #   若要切换回 native-tls，请同时评估 MSVC 下 Schannel 的行为差异与 GNU 下的 OpenSSL 分发成本。
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net"] }
-tokio-tungstenite = { version = "0.24", default-features = false, features = [
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
   "connect",
   "rustls-tls-webpki-roots",
 ] }
